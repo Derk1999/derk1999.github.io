@@ -8,12 +8,12 @@ dit bovenaan de Schermtijd-pagina als iframe (`/local/toezicht_websites.html`).
 Zelfde patroon als de weekschema-pipeline: script + launchd op de Mac Mini,
 output via de Samba-mount `~/mnt/ha-config/www/`.
 
-## Eenmalige voorbereiding in Home Assistant
+## Voorbereiding in Home Assistant
 
-1. Settings → Add-ons → AdGuard Home → Configuration → Network:
-   geef poort **80/tcp** vrij als **45158** → Save → herstart de add-on.
-2. Daarna is de API bereikbaar op `http://homeassistant.local:45158`
-   met je gewone Home Assistant-gebruikersnaam en -wachtwoord.
+Al gedaan in deze setup: de add-on heeft poort **80/tcp** vrijgegeven als
+**8053** en `leave_front_door_open` staat aan, dus de API is bereikbaar op
+`http://homeassistant.local:8053` zonder login. Geeft de API ooit een 401,
+vul dan `username`/`password` in config.json in.
 
 ## Installatie op de Mac Mini
 
@@ -21,15 +21,13 @@ output via de Samba-mount `~/mnt/ha-config/www/`.
 mkdir -p ~/scripts/toezicht && curl -fsSL https://raw.githubusercontent.com/derk1999/derk1999.github.io/claude/chrome-boek-school-website-femtjq/toezicht-websites/install.sh | bash
 ```
 
-Daarna:
+Daarna testen:
 
 ```
-open -e ~/scripts/toezicht/config.json
 python3 ~/scripts/toezicht/sync_toezicht_websites.py
 ```
 
-Vul in config.json je HA-login in; het testcommando moet eindigen met
-`OK: toezicht_websites.html geschreven`.
+Moet eindigen met `OK: toezicht_websites.html geschreven`.
 
 ## Wat het meet (en niet)
 

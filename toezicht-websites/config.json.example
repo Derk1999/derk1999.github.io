@@ -1,7 +1,7 @@
 {
-  "base_url": "http://homeassistant.local:45158",
-  "username": "VUL-IN-je-home-assistant-gebruikersnaam",
-  "password": "VUL-IN-je-home-assistant-wachtwoord",
+  "base_url": "http://homeassistant.local:8053",
+  "username": "",
+  "password": "",
   "hours": 24,
   "top_n": 20,
   "max_clients": 12,

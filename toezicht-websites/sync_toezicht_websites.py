@@ -25,7 +25,7 @@ CONFIG_PATH = SCRIPT_DIR / "config.json"
 LOG_PATH = SCRIPT_DIR / "sync.log"
 
 DEFAULTS = {
-    "base_url": "http://homeassistant.local:45158",
+    "base_url": "http://homeassistant.local:8053",
     "username": "",
     "password": "",
     "hours": 24,
@@ -346,13 +346,17 @@ h1{font-size:19px;margin:2px 0 2px}
 
 def main():
     cfg = load_config()
-    if not cfg["username"] or not cfg["password"]:
-        log("FOUT: vul username/password in config.json in "
-            "(je Home Assistant-login).")
-        return 1
     noise_list = NOISE_DOMAINS + list(cfg.get("extra_noise_domains") or [])
     try:
         ips = top_client_ips(cfg)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            log("FOUT: AdGuard geeft 401. Vul username/password in "
+                "config.json in (AdGuard-gebruiker bij leave_front_door_open "
+                "aan, anders je HA-login).")
+        else:
+            log(f"FOUT: AdGuard-API gaf HTTP {exc.code} op {cfg['base_url']}.")
+        return 1
     except (urllib.error.URLError, OSError) as exc:
         log(f"FOUT: AdGuard-API onbereikbaar op {cfg['base_url']}: {exc}. "
             "Is de poort vrijgegeven in de add-on (Netwerk, 80/tcp)?")
