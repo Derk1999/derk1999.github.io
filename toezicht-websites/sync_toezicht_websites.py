@@ -153,6 +153,9 @@ def top_client_ips(cfg):
         for ip, count in item.items():
             if ip in cfg["exclude_ips"]:
                 continue
+            # 172.30.x = intern add-on-netwerk van HA zelf, 127.x = localhost
+            if ip.startswith("172.30.") or ip.startswith("127."):
+                continue
             ordered.append((ip, count))
     ordered.sort(key=lambda x: -x[1])
     return [ip for ip, _ in ordered[: cfg["max_clients"]]]
