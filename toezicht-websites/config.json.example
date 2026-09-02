@@ -1,0 +1,14 @@
+{
+  "base_url": "http://homeassistant.local:45158",
+  "username": "VUL-IN-je-home-assistant-gebruikersnaam",
+  "password": "VUL-IN-je-home-assistant-wachtwoord",
+  "hours": 24,
+  "top_n": 20,
+  "max_clients": 12,
+  "min_queries": 20,
+  "client_names": {
+    "192.168.68.88": "Chromebook Tieners"
+  },
+  "exclude_ips": [],
+  "extra_noise_domains": []
+}
