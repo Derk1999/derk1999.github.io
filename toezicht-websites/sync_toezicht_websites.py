@@ -39,6 +39,7 @@ DEFAULTS = {
     "output_dir": "~/mnt/ha-config/www",
     "output_name": "toezicht_websites.html",
     "extra_noise_domains": [],
+    "bypass_check_ips": [],
 }
 
 # Infrastructuur/telemetrie-domeinen die niets zeggen over waar iemand
@@ -254,13 +255,42 @@ def aggregate(cfg, ip, entries, noise_list):
     }
 
 
+def ping_ok(ip):
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["ping", "-c", "1", ip],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def bypass_warnings(cfg, recent_counts):
+    """Apparaten die wel online zijn (ping) maar het afgelopen uur geen
+    enkele DNS-vraag via AdGuard deden = mogelijke omzeiling."""
+    warns = []
+    recent_cut = datetime.now(timezone.utc) - timedelta(minutes=65)
+    for ip in cfg.get("bypass_check_ips") or []:
+        if not ping_ok(ip):
+            continue
+        count = recent_counts.get(ip)
+        if count is None:
+            count = len(fetch_client_entries(cfg, ip, recent_cut))
+        if count == 0:
+            name = cfg["client_names"].get(ip, ip)
+            warns.append(f"{name} ({ip})")
+    return warns
+
+
 def fmt_minutes(m):
     if m >= 60:
         return f"{m // 60}u {m % 60:02d}m"
     return f"{m}m"
 
 
-def render_html(cfg, clients, generated):
+def render_html(cfg, clients, generated, warns=None):
     parts = []
     parts.append(
         """<!doctype html><html lang="nl"><head><meta charset="utf-8">
@@ -291,6 +321,8 @@ h1{font-size:19px;margin:2px 0 2px}
  opacity:.85}
 .val{color:#9a9aa2;font-size:12px;text-align:right;white-space:nowrap}
 .blk{color:#ff9b9b;font-size:12px;margin-top:8px}
+.warn{background:#3a2226;color:#ffb4b4;border-radius:10px;padding:10px 12px;
+ margin:0 0 12px;font-size:13.5px;line-height:1.4}
 .leeg{color:#9a9aa2;font-size:13px}
 </style></head><body>
 """
@@ -301,6 +333,14 @@ h1{font-size:19px;margin:2px 0 2px}
         f"{generated} &middot; sortering: actieve minuten (DNS-verzoeken "
         f"via AdGuard, geen exacte schermtijd)</p>"
     )
+    for w in warns or []:
+        parts.append(
+            f'<div class="warn">&#9888;&#65039; <b>{html.escape(w)}</b> is '
+            f"online maar deed het afgelopen uur g&eacute;&eacute;n "
+            f"DNS-verzoeken via AdGuard &mdash; mogelijk eigen "
+            f"DNS-instelling of hotspot (omzeiling van het filter)."
+            f"</div>"
+        )
     if not clients:
         parts.append(
             '<p class="leeg">Geen apparaten met genoeg verkeer gevonden in '
@@ -366,9 +406,12 @@ def main():
         return 1
     log(f"Top clients uit AdGuard-stats: {len(ips)}")
     cutoff = datetime.now(timezone.utc) - timedelta(hours=cfg["hours"])
+    recent_cut = datetime.now(timezone.utc) - timedelta(minutes=65)
+    recent_counts = {}
     clients = []
     for ip in ips:
         entries = fetch_client_entries(cfg, ip, cutoff)
+        recent_counts[ip] = sum(1 for e in entries if e[0] >= recent_cut)
         agg = aggregate(cfg, ip, entries, noise_list)
         if agg["queries"] + agg["blocked_total"] >= cfg["min_queries"]:
             clients.append(agg)
@@ -376,8 +419,11 @@ def main():
             f"{agg['queries']} bruikbaar, "
             f"{fmt_minutes(agg['active_minutes'])} actief")
     clients.sort(key=lambda c: (-c["active_minutes"], -c["queries"]))
+    warns = bypass_warnings(cfg, recent_counts)
+    for w in warns:
+        log(f"  WAARSCHUWING: {w} online zonder AdGuard-DNS (laatste uur)")
     generated = datetime.now().strftime("%d-%m %H:%M")
-    page = render_html(cfg, clients, generated)
+    page = render_html(cfg, clients, generated, warns)
     out_dir = Path(cfg["output_dir"]).expanduser()
     if not out_dir.is_dir():
         log(f"FOUT: {out_dir} bestaat niet. Is de Samba-mount actief? "
