@@ -31,6 +31,9 @@ Gebruik:
   python3 schoollaptops_dpi_sync.py --probe
                                        probeer verschillende DPI-endpoints op de UCG en toon
                                        per variant hoeveel data terugkomt (debug, niets naar HA)
+  python3 schoollaptops_dpi_sync.py --find-endpoints
+                                       doorzoek de webapp-bundel van de UCG naar API-paden voor
+                                       traffic flows / DPI / insights (debug, niets naar HA)
 """
 
 import datetime
@@ -376,6 +379,86 @@ def probe(cfg, clients):
     return 0
 
 
+def find_endpoints(cfg):
+    """Download de Network-webapp (JS) van de UCG en zoek API-paden die met flows/traffic/dpi te maken hebben."""
+    import re
+    unifi = UnifiClient(cfg)
+    unifi.ensure_session()
+    base = unifi.base
+
+    def fetch_text(path, limit=25_000_000):
+        headers = {"Accept": "*/*"}
+        if unifi.api_key:
+            headers["X-API-KEY"] = unifi.api_key
+        req = urllib.request.Request(base + path, headers=headers)
+        with unifi.opener.open(req, timeout=60) as resp:
+            return resp.read(limit).decode("utf-8", "replace")
+
+    html = ""
+    for entry in ("/proxy/network/manage/", "/proxy/network/manage/default/dashboard", "/proxy/network/"):
+        try:
+            html = fetch_text(entry)
+            if "<script" in html:
+                print(f"index geladen via {entry} ({len(html)} tekens)")
+                break
+        except Exception as err:  # noqa: BLE001
+            print(f"{entry}: {err}")
+    if not html:
+        print("Kon de webapp-index niet laden.")
+        return 1
+    scripts = re.findall(r'<script[^>]+src=["\']([^"\']+\.js[^"\']*)["\']', html)
+    scripts += re.findall(r'<link[^>]+href=["\']([^"\']+\.js)["\']', html)
+    print(f"{len(scripts)} script-tags gevonden")
+
+    def absolutize(src):
+        if src.startswith("http"):
+            return src[src.index("/", 8):]
+        if src.startswith("/"):
+            return src
+        return "/proxy/network/manage/" + src.lstrip("./")
+
+    pat_api = re.compile(r'(?:/proxy/network)?(/v2/api/[A-Za-z0-9_${}./?=&:-]+|/api/s/[A-Za-z0-9_${}./?=&:-]+|/v2/api/site/[A-Za-z0-9_${}./?=&:-]*)')
+    pat_frag = re.compile(r'["`\']((?:[A-Za-z0-9_${}-]+/)*[A-Za-z0-9_${}-]*(?:flow|traffic|dpi|insight|application)[A-Za-z0-9_${}-]*(?:/[A-Za-z0-9_${}-]+)*)["`\']', re.I)
+    found_api, found_frag = set(), set()
+    seen, queue, total = set(), [absolutize(x) for x in scripts], 0
+    while queue and len(seen) < 60 and total < 60_000_000:
+        path = queue.pop(0)
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            js = fetch_text(path)
+        except Exception as err:  # noqa: BLE001
+            print(f"  {path}: {err}")
+            continue
+        total += len(js)
+        hits_api = [m for m in pat_api.findall(js) if re.search(r'flow|traffic|dpi|insight|applic|stat', m, re.I)]
+        hits_frag = pat_frag.findall(js)
+        found_api.update(hits_api)
+        found_frag.update(hits_frag)
+        print(f"  {path[:90]}: {len(js)//1000} kB, api-paden={len(hits_api)}, fragmenten={len(hits_frag)}")
+        # lazy chunks die op flows/traffic/insights lijken meenemen
+        prefix = path.rsplit("/", 1)[0]
+        for chunk in re.findall(r'["\']([A-Za-z0-9_./-]+\.js)["\']', js):
+            if re.search(r'flow|traffic|insight|dpi|client|stat', chunk, re.I) and not chunk.startswith("http"):
+                cand = chunk if chunk.startswith("/") else prefix + "/" + chunk.lstrip("./")
+                if cand not in seen and cand not in queue:
+                    queue.append(cand)
+    out = os.path.join(BASE, "endpoints_found.txt")
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write("# API-paden\n" + "\n".join(sorted(found_api)) + "\n\n# Fragmenten\n" + "\n".join(sorted(found_frag)) + "\n")
+    print()
+    print("API-paden met flow/traffic/dpi/insight/stat:")
+    for m in sorted(found_api)[:150]:
+        print("  ", m)
+    print()
+    print("Losse padfragmenten:")
+    for m in sorted(found_frag)[:150]:
+        print("  ", m)
+    print("Alles opgeslagen in", out)
+    return 0
+
+
 def main(argv):
     verbose = "--verbose" in argv or "-v" in argv
     dry_run = "--dry-run" in argv
@@ -403,6 +486,8 @@ def main(argv):
 
     if "--probe" in argv:
         return probe(cfg, clients)
+    if "--find-endpoints" in argv:
+        return find_endpoints(cfg)
 
     unifi = UnifiClient(cfg)
     all_state = load_json(STATE_PATH, {})
