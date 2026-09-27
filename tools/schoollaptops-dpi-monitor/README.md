@@ -1,6 +1,6 @@
 # Schoollaptops DPI-monitor
 
-Meet per schoollaptop (Thijs .88, Jochem .85, Sieb .91) hoeveel YouTube- en
+Meet per schoollaptop (Thijs .88, Jochem .94, Sieb .91) hoeveel YouTube- en
 VPN/proxy-verkeer er per dag door de UCG-Ultra gaat, en zet dat in Home Assistant.
 Zo is te zien of de UniFi-blokkades werken, zonder handmatig in de UniFi-app te kijken.
 Alleen de clients in `config.json` worden gemeten. Niets anders in huis.
@@ -85,6 +85,9 @@ drempel of VPN/proxy boven 20 MB, dan is er ook een pushmelding gegaan.
 
 - HTTP 401/403 van de UCG: API-sleutel ongeldig. Vul eventueel `username`/`password` van
   het lokale admin-account in `config.json` als fallback.
+- Jochems Chromebook is `.94` (MAC 44:f7:9f:5e:15:9d, geverifieerd 19-09-2026). Het apparaat op `.85`
+  (MAC 3c:ef:a5:7a:3d:fd, hostnaam "Derks-Mac-mini") is een verkeerd geregistreerd apparaat en
+  wordt niet gemeten.
 - "geen MAC bekend voor 192.168.68.x": de UCG kent geen client met dat vaste IP. Check in
   de UniFi-app welke client het IP heeft.
 - "Onverwacht antwoord van UCG": kijk in `last_response_<prefix>.json` en pas
