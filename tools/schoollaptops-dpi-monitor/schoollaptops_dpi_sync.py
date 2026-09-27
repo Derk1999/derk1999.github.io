@@ -144,6 +144,7 @@ class UnifiClient:
         self._request("/api/auth/login", {"username": self.username, "password": self.password, "rememberMe": False})
 
     def _get(self, path):
+        self.ensure_session()
         try:
             return self._request(path)
         except urllib.error.HTTPError as err:
@@ -164,7 +165,12 @@ class UnifiClient:
                 return s["mac"].lower(), s.get("name") or s.get("hostname") or ""
         return None, ""
 
+    def ensure_session(self):
+        if not self.api_key and self.username and not self.csrf:
+            self.login()
+
     def dpi_by_app(self, mac):
+        self.ensure_session()
         path = f"/proxy/network/api/s/{self.site}/stat/stadpi"
         body = {"type": "by_app", "macs": [mac.lower()]}
         try:
