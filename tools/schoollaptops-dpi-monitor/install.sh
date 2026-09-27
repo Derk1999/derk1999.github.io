@@ -102,7 +102,7 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "launchd-job $LABEL geladen (elke 15 minuten)."
 
 echo
-echo "Testrun (eerste run zet alleen de nulmeting, cijfers komen bij de volgende run):"
+echo "Testrun (haalt het verkeer van vandaag op en zet het in Home Assistant):"
 "$PY" "$DEST/schoollaptops_dpi_sync.py" --verbose || true
 echo
 echo "Klaar. Log: $DEST/sync.log   Laatste UCG-antwoorden: $DEST/last_response_*_laptop.json"

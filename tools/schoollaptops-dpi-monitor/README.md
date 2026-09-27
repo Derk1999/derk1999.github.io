@@ -9,9 +9,11 @@ Alleen de clients in `config.json` worden gemeten. Niets anders in huis.
 
 Op de Mac Mini (dit script, via launchd elke 15 minuten):
 
-- `schoollaptops_dpi_sync.py` haalt per laptop de DPI-tellers per app op bij de UCG
-  (`/proxy/network/api/s/default/stat/stadpi`, type `by_app`), berekent het dagverschil
-  en stuurt dat naar HA. MAC-adressen worden bij de UCG opgezocht op basis van het vaste IP.
+- `schoollaptops_dpi_sync.py` haalt per laptop het verkeer per app van vandaag (00:00 tot nu)
+  op bij de UCG via `/proxy/network/v2/api/site/default/traffic/<mac>?start=&end=` (dezelfde
+  call als het tabblad Traffic van een client in de UniFi-app) en stuurt de totalen naar HA.
+  Het legacy-endpoint `stat/stadpi` geeft op Network 10.x een lege lijst en dient alleen nog
+  als fallback. MAC-adressen worden bij de UCG opgezocht op basis van het vaste IP.
 - `config.json` (niet in git): API-sleutel, HA-token, de drie laptops.
 - `state.json`: laatste tellerstanden en dagtotalen. `last_response_<prefix>.json`: ruwe
   antwoorden van de UCG, handig als het antwoordformaat anders blijkt dan verwacht.
@@ -40,7 +42,10 @@ Gedeeld:
 
 ## Installeren op de Mac Mini
 
-1. UniFi-app op `https://192.168.68.1`: Settings, Control Plane, Integrations, Create API Key.
+1. UniFi-app op `https://192.168.68.1`: Network-app, Settings, Control Plane, Integrations
+   (rechtstreeks: `https://192.168.68.1/network/default/integrations`), Create New API Key.
+   Op UniFi OS 5.1 staat dit in de Network-app, niet op het tabblad "UCG Ultra".
+   De sleutel werkt op de legacy- en v2-endpoints; gebruikersnaam/wachtwoord is alleen fallback.
 2. HA: profiel (linksonder), tabblad Security, Long-lived access tokens, Create token.
 3. Terminal op de Mac:
 
@@ -52,8 +57,7 @@ bash install.sh
 ```
 
 De installer vraagt om de sleutel en het token, schrijft `config.json`, laadt de
-launchd-job en doet een testrun. De eerste run is een nulmeting (0 MB); vanaf de
-tweede run (15 minuten later) komen de echte dagtotalen.
+launchd-job en doet een testrun. De eerste run levert meteen de dagtotalen van vandaag.
 
 ## Controleren
 
@@ -71,9 +75,11 @@ drempel of VPN/proxy boven 20 MB, dan is er ook een pushmelding gegaan.
 - Werkt het blok, dan ziet DPI toch nog het begin van elke poging (TLS-handshake).
   Een paar MB YouTube per dag is dus normaal. Tientallen MB is video.
 - Category 11 verkeer boven 20 MB betekent dat een VPN of proxy echt data doorlaat.
-- App-id's zonder naam staan als `app <cat>:<app>`; alleen YouTube (`4:112`) heeft een
-  naam. De naam van andere id's staat in de UniFi-app onder de client, tabblad Traffic.
-  Voeg ze toe aan `APP_NAMES` in het script als je ze vaker wilt zien.
+- App-id's zonder naam staan als `app <cat>:<app>`. De meest voorkomende (YouTube `4:112`,
+  SSL/TLS, Google, Google Docs, ChatGPT, Gmail, Pinterest, ...) staan in `APP_NAMES` in het
+  script; `255:65535` is "Onbekend" (niet-geïdentificeerd verkeer). De naam van een nieuw id
+  is af te lezen in de UniFi-app onder de client, tabblad Traffic, door de MB's te vergelijken
+  met `last_response_<prefix>.json`.
 
 ## Problemen
 
@@ -82,5 +88,7 @@ drempel of VPN/proxy boven 20 MB, dan is er ook een pushmelding gegaan.
 - "geen MAC bekend voor 192.168.68.x": de UCG kent geen client met dat vaste IP. Check in
   de UniFi-app welke client het IP heeft.
 - "Onverwacht antwoord van UCG": kijk in `last_response_<prefix>.json` en pas
-  `extract_counters` aan.
+  `extract_counters` aan. Verwacht v2-formaat: `client_usage_by_app[].usage_by_app[]` met
+  `category`, `application`, `bytes_received`, `bytes_transmitted`, `total_bytes`.
+- Debug: `--probe` test de verschillende endpoints, `--find-endpoints` doorzoekt de webapp.
 - Handmatig draaien: `python3 ~/scripts/schoollaptops-dpi/schoollaptops_dpi_sync.py --verbose`.
