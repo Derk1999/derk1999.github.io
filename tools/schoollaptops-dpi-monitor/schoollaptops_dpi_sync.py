@@ -28,6 +28,9 @@ Gebruik:
   python3 schoollaptops_dpi_sync.py --dry-run  niets naar HA sturen, wel state bijwerken
   python3 schoollaptops_dpi_sync.py --parse-file bestand.json
                                        verwerk een opgeslagen UCG-antwoord (debug)
+  python3 schoollaptops_dpi_sync.py --probe
+                                       probeer verschillende DPI-endpoints op de UCG en toon
+                                       per variant hoeveel data terugkomt (debug, niets naar HA)
 """
 
 import datetime
@@ -305,6 +308,74 @@ def clients_from_config(cfg):
     return result
 
 
+def _preview(obj, n=700):
+    txt = json.dumps(obj, ensure_ascii=False)
+    return txt if len(txt) <= n else txt[:n] + " ..."
+
+
+def probe(cfg, clients):
+    """Probeer meerdere DPI-varianten en print per variant een samenvatting. Slaat alles op in probe_result.json."""
+    unifi = UnifiClient(cfg)
+    site = unifi.site
+    mac = ""
+    if clients:
+        c = clients[0]
+        mac = c["mac"]
+        if not mac and c["ip"]:
+            try:
+                mac, _ = unifi.resolve_mac(c["ip"])
+            except Exception as err:  # noqa: BLE001
+                print("MAC opzoeken mislukt:", err)
+        print(f"Probe voor {c['name']} ({c['ip'] or '-'} / {mac or 'geen MAC'})")
+    variants = [
+        ("POST stat/stadpi by_app+macs", f"/proxy/network/api/s/{site}/stat/stadpi", {"type": "by_app", "macs": [mac]}),
+        ("POST stat/stadpi by_cat+macs", f"/proxy/network/api/s/{site}/stat/stadpi", {"type": "by_cat", "macs": [mac]}),
+        ("POST stat/stadpi by_app (alle clients)", f"/proxy/network/api/s/{site}/stat/stadpi", {"type": "by_app"}),
+        ("GET  stat/stadpi", f"/proxy/network/api/s/{site}/stat/stadpi", None),
+        ("POST stat/sitedpi by_app", f"/proxy/network/api/s/{site}/stat/sitedpi", {"type": "by_app"}),
+        ("POST stat/sitedpi by_cat", f"/proxy/network/api/s/{site}/stat/sitedpi", {"type": "by_cat"}),
+        ("GET  stat/dpi", f"/proxy/network/api/s/{site}/stat/dpi", None),
+        ("GET  rest/setting (dpi aan?)", f"/proxy/network/api/s/{site}/rest/setting", None),
+    ]
+    results = {}
+    for label, path, body in variants:
+        try:
+            unifi.ensure_session()
+            resp = unifi._request(path, body)
+        except urllib.error.HTTPError as err:
+            print(f"{label:42s} HTTP {err.code}")
+            results[label] = {"error": err.code}
+            continue
+        except Exception as err:  # noqa: BLE001
+            print(f"{label:42s} fout: {err}")
+            results[label] = {"error": str(err)}
+            continue
+        data = resp.get("data") if isinstance(resp, dict) else resp
+        if label.startswith("GET  rest/setting"):
+            dpi_settings = [d for d in (data or []) if isinstance(d, dict) and d.get("key") in ("dpi", "traffic_identification", "ips")]
+            print(f"{label:42s} {_preview(dpi_settings, 400)}")
+            results[label] = dpi_settings
+            continue
+        n = len(data) if isinstance(data, list) else "?"
+        sub = ""
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            first = data[0]
+            keys = sorted(first.keys())
+            sub = f" keys={keys[:12]}"
+            for k in ("by_app", "by_cat"):
+                if isinstance(first.get(k), list):
+                    sub += f" {k}={len(first[k])}"
+            macs = [d.get("mac") for d in data if isinstance(d, dict) and d.get("mac")]
+            if macs:
+                sub += f" macs={len(macs)} onze_mac={'ja' if mac in macs else 'nee'}"
+        print(f"{label:42s} data={n}{sub}")
+        print("    " + _preview(data, 500))
+        results[label] = data
+    save_json(os.path.join(BASE, "probe_result.json"), results)
+    print("Volledige antwoorden opgeslagen in", os.path.join(BASE, "probe_result.json"))
+    return 0
+
+
 def main(argv):
     verbose = "--verbose" in argv or "-v" in argv
     dry_run = "--dry-run" in argv
@@ -329,6 +400,9 @@ def main(argv):
     if not clients:
         logging.error("config.json bevat geen clients (of client_mac)")
         return 2
+
+    if "--probe" in argv:
+        return probe(cfg, clients)
 
     unifi = UnifiClient(cfg)
     all_state = load_json(STATE_PATH, {})
