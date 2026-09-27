@@ -1,0 +1,14 @@
+{
+  "ucg_url": "https://192.168.68.1",
+  "site": "default",
+  "api_key": "PLAK-HIER-DE-UNIFI-API-SLEUTEL",
+  "username": "",
+  "password": "",
+  "ha_url": "http://192.168.68.68:8123",
+  "ha_token": "PLAK-HIER-HET-HA-LONG-LIVED-TOKEN",
+  "clients": [
+    {"name": "Thijs",  "ip": "192.168.68.88", "prefix": "thijs_laptop"},
+    {"name": "Jochem", "ip": "192.168.68.85", "prefix": "jochem_laptop"},
+    {"name": "Sieb",   "ip": "192.168.68.91", "prefix": "sieb_laptop"}
+  ]
+}

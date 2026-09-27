@@ -1,0 +1,5 @@
+config.json
+state.json
+last_response*.json
+*.log
+*.log.1
