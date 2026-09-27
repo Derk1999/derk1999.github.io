@@ -421,6 +421,33 @@ def find_endpoints(cfg):
     pat_frag = re.compile(r'["`\']((?:[A-Za-z0-9_${}-]+/)*[A-Za-z0-9_${}-]*(?:flow|traffic|dpi|insight|application)[A-Za-z0-9_${}-]*(?:/[A-Za-z0-9_${}-]+)*)["`\']', re.I)
     found_api, found_frag = set(), set()
     seen, queue, total = set(), [absolutize(x) for x in scripts], 0
+    chunk_prefix = None  # wordt bepaald zodra de eerste chunk ergens 200 geeft
+
+    def locate_chunk(name, from_path):
+        """Probeer een chunk-bestand op een aantal plausibele plekken; geef het pad dat 200 geeft."""
+        nonlocal chunk_prefix
+        if chunk_prefix is not None:
+            return chunk_prefix + name
+        d = from_path.rsplit("/", 1)[0]
+        parent = d.rsplit("/", 1)[0]
+        cands = [d + "/", parent + "/", d + "/chunks/", parent + "/js/", parent + "/chunks/",
+                 "/proxy/network/manage/", "/proxy/network/manage/angular/", "/proxy/network/"]
+        # ook webpack publicPath-strings uit de runtime meenemen
+        for pp in public_paths:
+            cands.append(absolutize(pp).rstrip("/") + "/")
+        for c in cands:
+            try:
+                req = urllib.request.Request(base + c + name, method="HEAD")
+                with unifi.opener.open(req, timeout=20) as resp:
+                    if resp.status == 200:
+                        chunk_prefix = c
+                        print(f"  chunks staan onder {c}")
+                        return c + name
+            except Exception:  # noqa: BLE001
+                continue
+        return None
+
+    public_paths = []
     while queue and len(seen) < 60 and total < 60_000_000:
         path = queue.pop(0)
         if path in seen:
@@ -432,18 +459,28 @@ def find_endpoints(cfg):
             print(f"  {path}: {err}")
             continue
         total += len(js)
+        if not public_paths:
+            public_paths = re.findall(r'\.p\s*=\s*["\']([^"\']+)["\']', js) + re.findall(r'["\']([^"\']*angular/[^"\']*/)["\']', js)
+            if public_paths:
+                print(f"  publicPath-kandidaten: {sorted(set(public_paths))[:5]}")
         hits_api = [m for m in pat_api.findall(js) if re.search(r'flow|traffic|dpi|insight|applic|stat', m, re.I)]
         hits_frag = pat_frag.findall(js)
         found_api.update(hits_api)
         found_frag.update(hits_frag)
         print(f"  {path[:90]}: {len(js)//1000} kB, api-paden={len(hits_api)}, fragmenten={len(hits_frag)}")
         # lazy chunks die op flows/traffic/insights lijken meenemen
-        prefix = path.rsplit("/", 1)[0]
         for chunk in re.findall(r'["\']([A-Za-z0-9_./-]+\.js)["\']', js):
-            if re.search(r'flow|traffic|insight|dpi|client|stat', chunk, re.I) and not chunk.startswith("http"):
-                cand = chunk if chunk.startswith("/") else prefix + "/" + chunk.lstrip("./")
-                if cand not in seen and cand not in queue:
-                    queue.append(cand)
+            if chunk.startswith("http") or "/" in chunk.strip("./"):
+                cand = chunk if chunk.startswith("/") else absolutize(chunk)
+            elif re.search(r'flow|traffic|insight|dpi|client|stat|fetch|api|network', chunk, re.I):
+                cand = locate_chunk(chunk.lstrip("./"), path)
+                if cand is None:
+                    print(f"  chunk niet gevonden: {chunk}")
+                    continue
+            else:
+                continue
+            if cand not in seen and cand not in queue:
+                queue.append(cand)
     out = os.path.join(BASE, "endpoints_found.txt")
     with open(out, "w", encoding="utf-8") as fh:
         fh.write("# API-paden\n" + "\n".join(sorted(found_api)) + "\n\n# Fragmenten\n" + "\n".join(sorted(found_frag)) + "\n")
