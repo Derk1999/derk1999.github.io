@@ -15,10 +15,13 @@ Per client (prefix bijv. thijs_laptop):
   input_text.thijs_laptop_top_apps_vandaag        top 4 apps vandaag
   input_datetime.thijs_laptop_dpi_laatste_check   tijdstip laatste geslaagde meting
 
-De DPI-tellers op de gateway zijn cumulatief. Dit script bewaart de vorige
-tellerstand in state.json en telt alleen het verschil op bij het dagtotaal.
-Bij een teller die terugvalt (herstart gateway, reset DPI) wordt de nieuwe
-stand als verschil genomen.
+De gateway (Network 10.x) levert per client het verkeer per app over een
+tijdsbereik via /v2/api/site/<site>/traffic/<mac>?start=&end= (dezelfde call
+als het tabblad Traffic in de UniFi-app). Dit script vraagt het bereik
+"vandaag 00:00 tot nu" op en zet die totalen direct in HA; er is dus geen
+nulmeting nodig. Als die v2-call niet bestaat (oudere Network-versie) valt het
+script terug op het legacy-endpoint stat/stadpi met cumulatieve tellers; dan
+bewaart het de vorige tellerstand in state.json en telt alleen het verschil op.
 
 Alleen standaardbibliotheek, geen pip nodig. Draait via launchd elke 15 minuten.
 
@@ -43,6 +46,7 @@ import logging
 import os
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -55,7 +59,25 @@ LOG_PATH = os.path.join(BASE, "sync.log")
 # UniFi DPI: compound app-id = (categorie << 16) + app.  262256 = 4 << 16 + 112 = YouTube.
 YOUTUBE_KEYS = {"4:112"}
 VPN_CATS = {11}  # "Bypass proxies & tunnels"
-APP_NAMES = {"4:112": "YouTube"}
+# Namen afgelezen in de UniFi-app (client > Traffic) en gekoppeld aan de id's van de API.
+APP_NAMES = {
+    "4:112": "YouTube",
+    "0:70": "Google Chat",
+    "3:15": "Google Drive",
+    "5:95": "Gmail",
+    "13:15": "Google",
+    "13:66": "Amazon CloudFront",
+    "13:163": "Google Docs",
+    "13:190": "QUIC",
+    "18:63": "HTTP (onversleuteld)",
+    "20:185": "SSL/TLS",
+    "20:186": "Google APIs",
+    "20:189": "Google User Content",
+    "20:195": "Google Static Content",
+    "24:17": "Pinterest",
+    "28:9": "ChatGPT",
+    "255:65535": "Onbekend",
+}
 
 # Per client een set HA-helpers. Prefix "thijs_laptop" hoort bij de helpers die
 # in HA zijn aangemaakt. Voor een extra laptop: helpers met andere prefix aanmaken
@@ -175,10 +197,7 @@ class UnifiClient:
         if not self.api_key and self.username and not self.csrf:
             self.login()
 
-    def dpi_by_app(self, mac):
-        self.ensure_session()
-        path = f"/proxy/network/api/s/{self.site}/stat/stadpi"
-        body = {"type": "by_app", "macs": [mac.lower()]}
+    def _with_login_retry(self, path, body=None):
         try:
             return self._request(path, body)
         except urllib.error.HTTPError as err:
@@ -188,9 +207,53 @@ class UnifiClient:
                 return self._request(path, body)
             raise
 
+    def traffic_by_app(self, mac, start_ms, end_ms):
+        """Verkeer per app voor één client over [start_ms, end_ms] (v2-API, zoals het tabblad Traffic).
+        Geeft (antwoord, absolute): absolute=True betekent dat de bytes het totaal over het bereik zijn.
+        Valt terug op het legacy-endpoint stat/stadpi (cumulatieve tellers) als de v2-call niet bestaat."""
+        self.ensure_session()
+        mac = mac.lower()
+        v2 = (f"/proxy/network/v2/api/site/{self.site}/traffic/{mac}"
+              f"?start={int(start_ms)}&end={int(end_ms)}&includeUnidentified=true&mac={mac}")
+        try:
+            return self._with_login_retry(v2), True
+        except urllib.error.HTTPError as err:
+            if err.code not in (400, 404, 405):
+                raise
+            logging.warning("v2 traffic-endpoint gaf %s, val terug op legacy stat/stadpi", err.code)
+        path = f"/proxy/network/api/s/{self.site}/stat/stadpi"
+        return self._with_login_retry(path, {"type": "by_app", "macs": [mac]}), False
+
+    def dpi_by_app(self, mac):
+        """Legacy: cumulatieve DPI-tellers per app (stat/stadpi)."""
+        self.ensure_session()
+        path = f"/proxy/network/api/s/{self.site}/stat/stadpi"
+        return self._with_login_retry(path, {"type": "by_app", "macs": [mac.lower()]})
+
 
 def extract_counters(response, mac):
-    """Geef dict 'cat:app' -> bytes (rx+tx) uit het stadpi-antwoord."""
+    """Geef dict 'cat:app' -> bytes (rx+tx). Begrijpt twee formaten:
+    - v2 traffic: {"client_usage_by_app": [{"client": {"mac": ..}, "usage_by_app": [
+          {"application": 112, "category": 4, "bytes_received": .., "bytes_transmitted": .., "total_bytes": ..}]}]}
+    - legacy stadpi: {"data": [{"mac": .., "by_app": [{"app": .., "cat": .., "rx_bytes": .., "tx_bytes": ..}]}]}
+    """
+    if isinstance(response, dict) and isinstance(response.get("client_usage_by_app"), list):
+        counters = {}
+        for entry in response["client_usage_by_app"]:
+            if not isinstance(entry, dict):
+                continue
+            cmac = str((entry.get("client") or {}).get("mac", "")).lower()
+            if cmac and cmac != mac.lower():
+                continue
+            for app in entry.get("usage_by_app") or []:
+                if not isinstance(app, dict):
+                    continue
+                key = f"{int(app.get('category', -1))}:{int(app.get('application', -1))}"
+                total = app.get("total_bytes")
+                if total is None:
+                    total = int(app.get("bytes_received", 0) or 0) + int(app.get("bytes_transmitted", 0) or 0)
+                counters[key] = counters.get(key, 0) + int(total or 0)
+        return counters
     data = response.get("data") if isinstance(response, dict) else None
     if not isinstance(data, list):
         raise ValueError("Onverwacht antwoord van UCG (geen data-lijst)")
@@ -223,11 +286,22 @@ def extract_counters(response, mac):
     return counters
 
 
-def update_state(state, counters, today):
-    """Werk dagtotalen bij op basis van tellerverschillen. Geeft het bijgewerkte state-dict terug."""
+def update_state(state, counters, today, absolute=False):
+    """Werk dagtotalen bij. absolute=True: counters zijn al het totaal van vandaag (v2 traffic-API).
+    absolute=False: counters zijn cumulatieve tellers (legacy), tel alleen het verschil op.
+    Geeft het bijgewerkte state-dict terug."""
     if state.get("date") != today:
         state["date"] = today
         state["today"] = {}
+    if absolute:
+        state["today"] = {k: int(v) for k, v in counters.items() if v}
+        state["counters"] = {}
+        state["baselined"] = True
+        state["mode"] = "v2"
+        return state
+    if state.get("mode") == "v2":
+        state["mode"] = "legacy"
+        state["baselined"] = False  # van absolute naar cumulatief: opnieuw baselinen
     prev_all = state.get("counters") or {}
     first_run = not state.get("baselined", False)
     today_bytes = state.get("today") or {}
@@ -330,7 +404,9 @@ def probe(cfg, clients):
             except Exception as err:  # noqa: BLE001
                 print("MAC opzoeken mislukt:", err)
         print(f"Probe voor {c['name']} ({c['ip'] or '-'} / {mac or 'geen MAC'})")
+    now_ms = int(time.time() * 1000)
     variants = [
+        ("GET  v2 traffic/<mac> (24u)", f"/proxy/network/v2/api/site/{site}/traffic/{mac}?start={now_ms - 86400000}&end={now_ms}&includeUnidentified=true&mac={mac}", None),
         ("POST stat/stadpi by_app+macs", f"/proxy/network/api/s/{site}/stat/stadpi", {"type": "by_app", "macs": [mac]}),
         ("POST stat/stadpi by_cat+macs", f"/proxy/network/api/s/{site}/stat/stadpi", {"type": "by_cat", "macs": [mac]}),
         ("POST stat/stadpi by_app (alle clients)", f"/proxy/network/api/s/{site}/stat/stadpi", {"type": "by_app"}),
@@ -358,6 +434,12 @@ def probe(cfg, clients):
             dpi_settings = [d for d in (data or []) if isinstance(d, dict) and d.get("key") in ("dpi", "traffic_identification", "ips")]
             print(f"{label:42s} {_preview(dpi_settings, 400)}")
             results[label] = dpi_settings
+            continue
+        if isinstance(resp, dict) and isinstance(resp.get("client_usage_by_app"), list):
+            apps = sum(len(e.get("usage_by_app") or []) for e in resp["client_usage_by_app"] if isinstance(e, dict))
+            print(f"{label:42s} clients={len(resp['client_usage_by_app'])} apps={apps}")
+            print("    " + _preview(resp, 500))
+            results[label] = resp
             continue
         n = len(data) if isinstance(data, list) else "?"
         sub = ""
@@ -547,6 +629,9 @@ def main(argv):
     per_client = all_state.setdefault("clients", {})
     now_local = datetime.datetime.now()
     today = now_local.date().isoformat()
+    midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_ms = int(midnight.timestamp() * 1000)
+    end_ms = int(now_local.timestamp() * 1000)
     rc = 0
 
     mac_cache = all_state.setdefault("mac_by_ip", {})
@@ -571,14 +656,16 @@ def main(argv):
             logging.error("[%s] geen MAC bekend voor %s (client nooit gezien op de UCG?)", client["name"], client["ip"])
             rc = 1
             continue
+        absolute = False
         try:
             if parse_file:
                 response = load_json(parse_file, None)
                 if response is None:
                     logging.error("Kan %s niet lezen", parse_file)
                     return 2
+                absolute = isinstance(response, dict) and "client_usage_by_app" in response
             else:
-                response = unifi.dpi_by_app(mac)
+                response, absolute = unifi.traffic_by_app(mac, start_ms, end_ms)
                 save_json(RAW_PATH.replace(".json", f"_{client['prefix']}.json"), response)
         except urllib.error.HTTPError as err:
             logging.error("[%s] UCG HTTP-fout %s: %s", client["name"], err.code, err.reason)
@@ -599,7 +686,7 @@ def main(argv):
         state = per_client.get(client["prefix"])
         if not isinstance(state, dict) or state.get("mac") != mac:
             state = {"mac": mac}  # nieuw of ander apparaat: opnieuw baselinen
-        state = update_state(state, counters, today)
+        state = update_state(state, counters, today, absolute=absolute)
         per_client[client["prefix"]] = state
         save_json(STATE_PATH, all_state)
 

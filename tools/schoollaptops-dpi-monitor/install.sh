@@ -28,7 +28,7 @@ if [ ! -f "$DEST/config.json" ]; then
   UNIFI_API_KEY="${UNIFI_API_KEY:-}"
   HA_TOKEN="${HA_TOKEN:-}"
   IP_THIJS="${IP_THIJS:-192.168.68.88}"
-  IP_JOCHEM="${IP_JOCHEM:-192.168.68.85}"
+  IP_JOCHEM="${IP_JOCHEM:-192.168.68.94}"
   IP_SIEB="${IP_SIEB:-192.168.68.91}"
   UCG_URL="${UCG_URL:-https://192.168.68.1}"
   HA_URL="${HA_URL:-http://192.168.68.68:8123}"
@@ -102,7 +102,7 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "launchd-job $LABEL geladen (elke 15 minuten)."
 
 echo
-echo "Testrun (eerste run zet alleen de nulmeting, cijfers komen bij de volgende run):"
+echo "Testrun (haalt het verkeer van vandaag op en zet het in Home Assistant):"
 "$PY" "$DEST/schoollaptops_dpi_sync.py" --verbose || true
 echo
 echo "Klaar. Log: $DEST/sync.log   Laatste UCG-antwoorden: $DEST/last_response_*_laptop.json"
