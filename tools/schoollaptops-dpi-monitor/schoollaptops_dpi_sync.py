@@ -435,16 +435,23 @@ def find_endpoints(cfg):
         # ook webpack publicPath-strings uit de runtime meenemen
         for pp in public_paths:
             cands.append(absolutize(pp).rstrip("/") + "/")
+        tried = []
         for c in cands:
+            if c in tried:
+                continue
+            tried.append(c)
             try:
-                req = urllib.request.Request(base + c + name, method="HEAD")
+                req = urllib.request.Request(base + c + name, headers={"Accept": "*/*"})
                 with unifi.opener.open(req, timeout=20) as resp:
-                    if resp.status == 200:
+                    head = resp.read(2000).decode("utf-8", "replace")
+                    ctype = resp.headers.get("Content-Type", "")
+                    if resp.status == 200 and "html" not in ctype.lower() and "<html" not in head.lower():
                         chunk_prefix = c
                         print(f"  chunks staan onder {c}")
                         return c + name
             except Exception:  # noqa: BLE001
                 continue
+        print(f"  geprobeerd voor {name}: {tried}")
         return None
 
     public_paths = []
@@ -463,6 +470,13 @@ def find_endpoints(cfg):
             public_paths = re.findall(r'\.p\s*=\s*["\']([^"\']+)["\']', js) + re.findall(r'["\']([^"\']*angular/[^"\']*/)["\']', js)
             if public_paths:
                 print(f"  publicPath-kandidaten: {sorted(set(public_paths))[:5]}")
+            # context tonen rond de eerste chunk-naam en rond .js-templates, zodat het pad-patroon zichtbaar wordt
+            for needle in ("flows.", '.js"', ".js`", "publicPath", "importScripts", "document.baseURI", "currentScript"):
+                i = js.find(needle)
+                if i >= 0:
+                    print(f"  context [{needle}]: ...{js[max(0, i-160):i+160]!r}...")
+            urls = sorted(set(m for m in re.findall(r'["\']([A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+)["\']', js) if len(m) < 80))
+            print(f"  pad-achtige strings in dit bestand ({len(urls)}): {urls[:40]}")
         hits_api = [m for m in pat_api.findall(js) if re.search(r'flow|traffic|dpi|insight|applic|stat', m, re.I)]
         hits_frag = pat_frag.findall(js)
         found_api.update(hits_api)
@@ -471,7 +485,7 @@ def find_endpoints(cfg):
         # lazy chunks die op flows/traffic/insights lijken meenemen
         for chunk in re.findall(r'["\']([A-Za-z0-9_./-]+\.js)["\']', js):
             if chunk.startswith("http") or "/" in chunk.strip("./"):
-                cand = chunk if chunk.startswith("/") else absolutize(chunk)
+                cand = chunk if chunk.startswith("/proxy/") else absolutize(chunk.lstrip("/"))
             elif re.search(r'flow|traffic|insight|dpi|client|stat|fetch|api|network', chunk, re.I):
                 cand = locate_chunk(chunk.lstrip("./"), path)
                 if cand is None:
