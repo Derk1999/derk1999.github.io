@@ -39,16 +39,17 @@ HA-bestand, maar in een **gedeelde Google-agenda "Weekschema"**. Redenen:
 Het Word-schema blijft de basis (vaste ritmes, ophalen/brengen, eten). De agenda is de laag
 "wat is er deze dagen anders of extra".
 
-Alternatief voor een nieuwe agenda: de bestaande Google-gezinsagenda **"Gezin"**
-(`family17920918689768585313@group.calendar.google.com`, zichtbaar in het huis-account).
-Nadeel: daar staat straks ook ander gezinsspul in dat dan op het paneel verschijnt. Advies:
-aparte agenda "Weekschema".
+Alternatief voor een nieuwe agenda: de bestaande, lege Google-gezinsagenda **"Gezin"**
+(`family17920918689768585313@group.calendar.google.com`). Nadeel: daar staat straks ook
+ander gezinsspul in dat dan op het paneel verschijnt. Advies: aparte agenda "Weekschema".
+De agenda van medischadvies.vankampen@gmail.com is zakelijk (Medisch Advies) en blijft
+buiten dit plan; HA leest die ook nu niet.
 
 ## Ingangen, eerlijk beoordeeld
 
 | Ingang | Hoe | Oordeel |
 |---|---|---|
-| **Mail** naar medischadvies.vankampen@gmail.com, onderwerp bevat "weekschema" | Ingebouwde **IMAP**-integratie vuurt `imap_content`; `automation_mail_inbox.yaml` knipt handtekening/quotes af en stuurt de regels naar het script. Onderwerp "weekschema: di 15:00 Thijs tandarts" zonder tekst werkt ook. | ✅ Betrouwbaar, geen HACS. Eenmalig: 2-staps-verificatie + app-wachtwoord op het huis-Gmail. Vertraging = IMAP-poll (standaard elke 30 s, IDLE als Gmail dat toestaat). |
+| **Mail**, onderwerp bevat "weekschema" | Ingebouwde **IMAP**-integratie vuurt `imap_content`; `automation_mail_inbox.yaml` knipt handtekening/quotes af en stuurt de regels naar het script. Onderwerp "weekschema: di 15:00 Thijs tandarts" zonder tekst werkt ook. | ✅ Betrouwbaar, geen HACS. Eenmalig: 2-staps-verificatie + app-wachtwoord. Vertraging = IMAP-poll (standaard elke 30 s, IDLE als Gmail dat toestaat). Let op: medischadvies.vankampen@gmail.com is de zakelijke mailbox; HA mag alleen een apart label "Weekschema" lezen (Gmail-filter, inbox overslaan), of er komt een eigen gratis Gmail-adres voor. |
 | **HA-app / Assist** | `automation_assist.yaml`: zin "zet … in het weekschema" of "weekschema …" in de Assist-chat van de HA-app (Pixel, Samsung, iPad). Werkt met de ingebouwde Assist, geen LLM. | ✅ Direct beschikbaar. Spraak via de Atom Echo kan ook, maar Nederlandse STT op namen (Sieb, Jochem) is wisselvallig; typen is de betrouwbare vorm. |
 | **iPad bij de trapkast** | `input_text.weekschema_invoer` + knop (`dashboard_cards.yaml`, `script_weekschema_invoer_dashboard.yaml`). | ✅ Voor de au pair zonder telefoon in de hand. |
 | **Agenda-app** | Items direct in de gedeelde agenda zetten. | ✅ Nul techniek, altijd beschikbaar. Voor de au pair misschien zelfs de natuurlijkste weg. |
@@ -93,10 +94,14 @@ de kaart-template en het mail-afknipwerk zijn ook live getest.
    (calendar.google.com → Andere agenda's → + → Nieuwe agenda), delen met Elske en de au pair
    met "Wijzigingen aanbrengen". Daarna in HA de Google-integratie herladen; de entiteit
    wordt `calendar.weekschema` (anders de naam in de YAML-bestanden aanpassen).
-2. **Voor de mail-ingang**: op medischadvies.vankampen@gmail.com 2-staps-verificatie aanzetten
-   en een app-wachtwoord maken (Google-account → Beveiliging → App-wachtwoorden). Dat
-   wachtwoord in HA invullen bij Add integration → IMAP (Claude kan het niet, het is een geheim).
-   Het mailadres van de au pair in de afzenderlijst van `automation_mail_inbox.yaml` zetten.
+2. **Voor de mail-ingang**: kiezen tussen (a) het bestaande huis-adres met een Gmail-filter
+   (onderwerp bevat "weekschema" → label "Weekschema", inbox overslaan; HA leest alleen die
+   map, de zakelijke Medisch Advies-post blijft erbuiten) of (b) een eigen gratis Gmail-adres
+   alleen hiervoor. Op dat account 2-staps-verificatie aanzetten en een app-wachtwoord maken
+   (Google-account → Beveiliging → App-wachtwoorden). Dat wachtwoord in HA invullen bij
+   Add integration → IMAP, folder "Weekschema" bij (a) of INBOX bij (b). Claude kan dit niet
+   doen, het is een geheim. Het mailadres van de au pair in de afzenderlijst van
+   `automation_mail_inbox.yaml` zetten.
 3. **Voor de WhatsApp-proef**: op de Pixel in de HA-app de sensor "Last notification"
    aanzetten met allow-list = WhatsApp; WhatsApp-groep "Weekschema" maken; één testbericht
    sturen en de attributen van `sensor.pixel_10_pro_last_notification` bekijken.

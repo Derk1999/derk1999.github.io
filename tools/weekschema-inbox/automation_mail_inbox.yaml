@@ -3,12 +3,18 @@
 #   Settings -> Devices & services -> Add integration -> IMAP
 #   server imap.gmail.com, poort 993, gebruikersnaam = het Gmail-adres,
 #   wachtwoord = een Google "app-wachtwoord" (vereist 2-staps-verificatie op dat account),
-#   folder INBOX, zoekfilter: UnSeen UnDeleted  (standaard).
+#   folder "Weekschema" (NIET INBOX), zoekfilter: UnSeen UnDeleted  (standaard).
 #   In de IMAP-opties: "Max. berichtgrootte" mag op de standaard blijven; de automation
 #   leest alleen de platte tekst.
 #
-# Gebruik: mail naar medischadvies.vankampen@gmail.com met het woord "weekschema" in het
-# onderwerp. Elke regel in de mail (boven de handtekening) wordt een item.
+# Het adres medischadvies.vankampen@gmail.com is de zakelijke mailbox van Medisch Advies.
+# Daarom in Gmail eerst een filter maken: onderwerp bevat "weekschema" -> label "Weekschema"
+# toepassen + inbox overslaan (archiveren). Het label is in IMAP een map; HA kijkt alleen
+# daar. De zakelijke inbox blijft zo schoon en HA ziet geen zakelijke post.
+# Alternatief: een eigen gratis Gmail-adres (bv. weekschema.vankampen@gmail.com) met folder INBOX.
+#
+# Gebruik: mail met het woord "weekschema" in het onderwerp naar dat adres.
+# Elke regel in de mail (boven de handtekening) wordt een item.
 # Eén-regelig kan ook: onderwerp "weekschema: di 15:00 Thijs tandarts" zonder tekst.
 alias: Weekschema - mail inbox
 description: Zet mails met "weekschema" in het onderwerp om in agenda-items.
