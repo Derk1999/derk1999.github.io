@@ -1,0 +1,18 @@
+# Hulpscript voor de dashboard-knop: leest input_text.weekschema_invoer, voegt toe, maakt leeg.
+# Helper aanmaken: input_text.weekschema_invoer (max 255 tekens, icoon mdi:calendar-plus).
+alias: Weekschema - invoer vanaf dashboard
+mode: single
+sequence:
+  - variables:
+      tekst: "{{ states('input_text.weekschema_invoer') | trim }}"
+  - condition: template
+    value_template: "{{ tekst not in ['', 'unknown', 'unavailable'] }}"
+  - action: script.weekschema_item_toevoegen
+    data:
+      tekst: "{{ tekst }}"
+      bron: ipad
+  - action: input_text.set_value
+    target:
+      entity_id: input_text.weekschema_invoer
+    data:
+      value: ""

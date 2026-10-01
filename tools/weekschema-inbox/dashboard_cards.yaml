@@ -1,0 +1,35 @@
+# Kaarten voor ipad-wand, kolom 3 (jq-pad .views[0].sections[3].cards), direct onder het
+# weekschema-iframe (index 1) en boven de "laatste update"-regel.
+# Invoegen met ha_config_get_dashboard(url_path='ipad-wand') -> ha_config_set_dashboard(python_transform=...)
+# en lijst-bewerking via .insert()/.extend() (geen + op lijsten in de transform-sandbox).
+
+# 1) Extra items van vandaag / morgen / overmorgen (leest sensor.weekschema_extra)
+- type: markdown
+  content: >-
+    {% set dagen = ['ma','di','wo','do','vr','za','zo'] %}
+    {% set ev = state_attr('sensor.weekschema_extra', 'events') or [] %}
+    ### ➕ Extra in het weekschema
+
+    {% for i in range(3) %}{% set d = (now() + timedelta(days=i)).date() %}{% set lijst = ev | selectattr('start', 'match', d.isoformat()) | list %}
+    **{{ ['Vandaag', 'Morgen', 'Overmorgen'][i] }}** <font color="#888">{{ dagen[d.weekday()] }} {{ d.day }}/{{ d.month }}</font>
+
+    {% for e in lijst %}- {{ e.start[11:16] if 'T' in e.start else 'hele dag' }} · **{{ e.summary }}**
+    {% endfor %}{% if not lijst %}<font color="#888">_niets extra_</font>
+    {% endif %}
+    {% endfor %}{% if states('sensor.weekschema_extra') in ['unknown', 'unavailable'] %}<font color="#FFD600">⚠️ agenda niet bereikbaar</font>{% endif %}
+  card_mod:
+    style: "ha-markdown { font-size: 0.95em; } ha-markdown p { margin: 2px 0; }"
+
+# 2) Invoer op de iPad zelf (voor de au pair bij de trapkast)
+- type: entities
+  show_header_toggle: false
+  entities:
+    - entity: input_text.weekschema_invoer
+      name: "Toevoegen: dag tijd tekst"
+    - type: button
+      name: " "
+      icon: mdi:calendar-plus
+      action_name: Zet in weekschema
+      tap_action:
+        action: perform-action
+        perform_action: script.weekschema_invoer_dashboard

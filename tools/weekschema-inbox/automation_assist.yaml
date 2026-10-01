@@ -1,0 +1,21 @@
+# Automation: Weekschema - via Assist
+# Werkt direct met de ingebouwde Assist (conversation.home_assistant), geen LLM nodig.
+# Typen in de HA-app (Assist-knop rechtsboven) of inspreken op de Atom Echo:
+#   "zet dinsdag 15:00 Thijs tandarts in het weekschema"
+#   "weekschema morgen Jochem hockey valt uit"
+# Kanttekening: spraakherkenning (Nabu Casa STT) op namen als "Sieb" is niet gegarandeerd;
+# typen in de app is betrouwbaar.
+alias: Weekschema - via Assist
+description: Zin in Assist -> item in calendar.weekschema
+mode: queued
+triggers:
+  - trigger: conversation
+    command:
+      - "(zet|voeg) {tekst} (in|toe aan) het weekschema"
+      - "weekschema {tekst}"
+actions:
+  - action: script.weekschema_item_toevoegen
+    data:
+      tekst: "{{ trigger.slots.tekst }}"
+      bron: assist
+  - set_conversation_response: "Toegevoegd aan het weekschema: {{ trigger.slots.tekst }}"

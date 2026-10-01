@@ -1,0 +1,67 @@
+# Automation: Weekschema - mail inbox
+# Vereist: IMAP-integratie (ingebouwd) op het huis-Gmail medischadvies.vankampen@gmail.com
+#   Settings -> Devices & services -> Add integration -> IMAP
+#   server imap.gmail.com, poort 993, gebruikersnaam = het Gmail-adres,
+#   wachtwoord = een Google "app-wachtwoord" (vereist 2-staps-verificatie op dat account),
+#   folder INBOX, zoekfilter: UnSeen UnDeleted  (standaard).
+#   In de IMAP-opties: "Max. berichtgrootte" mag op de standaard blijven; de automation
+#   leest alleen de platte tekst.
+#
+# Gebruik: mail naar medischadvies.vankampen@gmail.com met het woord "weekschema" in het
+# onderwerp. Elke regel in de mail (boven de handtekening) wordt een item.
+# Eén-regelig kan ook: onderwerp "weekschema: di 15:00 Thijs tandarts" zonder tekst.
+alias: Weekschema - mail inbox
+description: Zet mails met "weekschema" in het onderwerp om in agenda-items.
+mode: queued
+max: 10
+triggers:
+  - trigger: event
+    event_type: imap_content
+conditions:
+  - condition: template
+    value_template: "{{ 'weekschema' in (trigger.event.data.subject | default('') | lower) }}"
+  - condition: template
+    # Alleen bekende afzenders; vul hier het mailadres van de au pair aan.
+    value_template: >-
+      {% set afz = trigger.event.data.sender | default('') | lower %}
+      {{ ['elskesieswerda@gmail.com', 'derkvankampen@gmail.com', 'medischadvies.vankampen@gmail.com']
+         | select('in', afz) | list | count > 0 }}
+actions:
+  - variables:
+      onderwerp_item: >-
+        {% set s = trigger.event.data.subject | default('') %}
+        {% set na = s | lower | regex_replace('^.*?weekschema', '') | trim(' :-') %}
+        {{ s[(s | length) - (na | length):] if na else '' }}
+      body: >-
+        {% set ns = namespace(lines=[], stop=false) %}
+        {% for l in (trigger.event.data.text | default('') | string).split('\n') %}
+          {% set s = l | trim %}
+          {% if not ns.stop %}
+            {% if s.startswith('>') or s.startswith('--') or s.startswith('__')
+                  or s is match('^(Op|On) .*(schreef|wrote)') or s is match('^Verzonden vanaf')
+                  or s is match('^Sent from') or s | lower is match('^\\*?please excuse') %}
+              {% set ns.stop = true %}
+            {% elif s %}
+              {% set ns.lines = ns.lines + [s] %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.lines | join('\n') }}
+      tekst: "{{ ([onderwerp_item, body] | select('ne', '') | join('\n')) }}"
+  - if:
+      - condition: template
+        value_template: "{{ tekst | trim != '' }}"
+    then:
+      - action: script.weekschema_item_toevoegen
+        data:
+          tekst: "{{ tekst }}"
+          bron: "mail van {{ trigger.event.data.sender }}"
+      - action: notify.mobile_app_pixel_10_pro
+        data:
+          title: Weekschema bijgewerkt
+          message: "Via mail van {{ trigger.event.data.sender }}:\n{{ tekst }}"
+    else:
+      - action: notify.mobile_app_pixel_10_pro
+        data:
+          title: Weekschema-mail zonder inhoud
+          message: "Mail van {{ trigger.event.data.sender }} had geen regels om toe te voegen."

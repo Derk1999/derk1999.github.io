@@ -1,0 +1,131 @@
+# Script: Weekschema - item toevoegen
+# Eén ingang voor alle kanalen (mail, WhatsApp-notificatie, Assist, iPad-invoer).
+# Elke regel in `tekst` wordt één agenda-item in calendar.weekschema.
+#
+# Regelformaat (alles optioneel behalve de tekst):
+#   [dag] [tijd] tekst
+#   dag  = vandaag | morgen | overmorgen | ma..zo | maandag..zondag | 7-10 | 7/10 | 7-10-2026
+#   tijd = 15:00 | 15.00 | 15u | 15u30 | 15:00-16:00
+#   geen dag  -> vandaag
+#   geen tijd -> hele dag
+#   geen eindtijd -> 1 uur
+#
+# Getest in HA (ha_eval_template, 01-10-2026) met o.a.:
+#   "di 15:00 Thijs tandarts"          -> 2026-10-06 15:00-16:00
+#   "morgen Jochem hockey valt uit"    -> 2026-10-02 hele dag
+#   "7-10 09:30-11:00 Sieb orthodontist" -> 2026-10-07 09:30-11:00
+#   "vandaag 19u ouderavond"           -> vandaag 19:00-20:00
+#   "3/1 nieuwjaarsborrel"             -> 2027-01-03 (datum in het verleden -> volgend jaar)
+#
+# Installeren: ha_config_set_script(...) of Settings -> Automations & Scenes -> Scripts -> YAML.
+alias: Weekschema - item toevoegen
+description: >-
+  Zet één of meer regels tekst om in agenda-items in calendar.weekschema.
+  Wordt aangeroepen door de mail-, WhatsApp-, Assist- en iPad-automations.
+mode: queued
+max: 10
+fields:
+  tekst:
+    name: Tekst
+    description: Eén item per regel. Zie formaat in de beschrijving.
+    required: true
+    selector:
+      text:
+        multiline: true
+  bron:
+    name: Bron
+    description: Waar het bericht vandaan komt (mail, whatsapp, assist, ipad)
+    default: onbekend
+    selector:
+      text: {}
+variables:
+  kalender: calendar.weekschema
+  items: >-
+    {% set dagen = {'ma':0,'maandag':0,'di':1,'dinsdag':1,'wo':2,'woensdag':2,
+                    'do':3,'donderdag':3,'vr':4,'vrijdag':4,'za':5,'zaterdag':5,
+                    'zo':6,'zondag':6} %}
+    {% set vandaag = now().date() %}
+    {% set ns = namespace(items=[], datum=vandaag, w=[], start=none, eind=none) %}
+    {% for raw in (tekst | string).split('\n') %}
+      {% set regel = raw | trim %}
+      {% if regel %}
+        {% set ns.w = regel.split() %}
+        {% set ns.datum = vandaag %}
+        {% set ns.start = none %}{% set ns.eind = none %}
+        {% set first = ns.w[0] | lower | trim(',:;.') %}
+        {% if first == 'vandaag' %}
+          {% set ns.w = ns.w[1:] %}
+        {% elif first == 'morgen' %}
+          {% set ns.datum = vandaag + timedelta(days=1) %}{% set ns.w = ns.w[1:] %}
+        {% elif first == 'overmorgen' %}
+          {% set ns.datum = vandaag + timedelta(days=2) %}{% set ns.w = ns.w[1:] %}
+        {% elif first in dagen %}
+          {% set ns.datum = vandaag + timedelta(days=(dagen[first] - vandaag.weekday()) % 7) %}
+          {% set ns.w = ns.w[1:] %}
+        {% elif first is match('^\\d{1,2}[-/]\\d{1,2}([-/]\\d{2,4})?$') %}
+          {% set p = first | regex_findall('\\d+') %}
+          {% set jaar = (p[2] | int) if p | length > 2 else vandaag.year %}
+          {% set jaar = jaar + 2000 if jaar < 100 else jaar %}
+          {% set kand = strptime('%02d-%02d-%04d' | format(p[0] | int, p[1] | int, jaar), '%d-%m-%Y').date() %}
+          {% if p | length < 3 and (vandaag - kand).days > 60 %}
+            {% set kand = strptime('%02d-%02d-%04d' | format(p[0] | int, p[1] | int, jaar + 1), '%d-%m-%Y').date() %}
+          {% endif %}
+          {% set ns.datum = kand %}
+          {% set ns.w = ns.w[1:] %}
+        {% endif %}
+        {% if ns.w and (ns.w[0] | lower) is match('^\\d{1,2}([:.u]\\d{2}|u)(-\\d{1,2}([:.u]\\d{2}|u))?$') %}
+          {% set t = ns.w[0] | lower | regex_findall('(\\d{1,2})(?:[:.u](\\d{2}))?') %}
+          {% set ns.start = '%02d:%02d' | format(t[0][0] | int, t[0][1] | int(0)) %}
+          {% if t | length > 1 %}
+            {% set ns.eind = '%02d:%02d' | format(t[1][0] | int, t[1][1] | int(0)) %}
+          {% endif %}
+          {% set ns.w = ns.w[1:] %}
+        {% endif %}
+        {% if ns.w %}
+          {% set ns.items = ns.items + [{'summary': ns.w | join(' '),
+                                         'date': ns.datum.isoformat(),
+                                         'start': ns.start, 'end': ns.eind}] %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.items }}
+sequence:
+  - repeat:
+      for_each: "{{ items }}"
+      sequence:
+        - if:
+            - condition: template
+              value_template: "{{ repeat.item.start is none }}"
+          then:
+            - action: calendar.create_event
+              target:
+                entity_id: "{{ kalender }}"
+              data:
+                summary: "{{ repeat.item.summary }}"
+                description: "via {{ bron }}"
+                start_date: "{{ repeat.item.date }}"
+                end_date: "{{ (strptime(repeat.item.date, '%Y-%m-%d') + timedelta(days=1)).date().isoformat() }}"
+          else:
+            - action: calendar.create_event
+              target:
+                entity_id: "{{ kalender }}"
+              data:
+                summary: "{{ repeat.item.summary }}"
+                description: "via {{ bron }}"
+                start_date_time: "{{ repeat.item.date }} {{ repeat.item.start }}:00"
+                end_date_time: >-
+                  {% if repeat.item.end %}
+                    {{ repeat.item.date }} {{ repeat.item.end }}:00
+                  {% else %}
+                    {{ (strptime(repeat.item.date ~ ' ' ~ repeat.item.start, '%Y-%m-%d %H:%M') + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S') }}
+                  {% endif %}
+  # Kaart op het dashboard direct verversen (zie template_sensor_weekschema_extra.yaml)
+  - action: homeassistant.update_entity
+    target:
+      entity_id: "{{ kalender }}"
+  - delay:
+      seconds: 3
+  - event: weekschema_ververst
+    event_data:
+      aantal: "{{ items | count }}"
+      bron: "{{ bron }}"

@@ -1,0 +1,53 @@
+# Automation: Weekschema - WhatsApp via notificatie-sensor (Android)
+#
+# Dit is de enige WhatsApp-route zonder Meta/Twilio-account: de HA Companion-app op een
+# Android-telefoon leest de WhatsApp-NOTIFICATIE van een groep "Weekschema" en geeft de tekst
+# door. Geen bericht-API, geen koppeling met het WhatsApp-nummer zelf.
+#
+# Instellen op de telefoon (Pixel 10 Pro van Elske, of een oude Android die altijd thuis ligt):
+#   HA-app -> Instellingen -> Companion app -> Sensoren beheren -> "Last notification"
+#     -> inschakelen, toegang "Meldingen" toestaan, en bij "Allow list" ALLEEN WhatsApp kiezen
+#        (anders ziet HA ook bank-, mail- en andere meldingen).
+#   WhatsApp: groep "Weekschema" aanmaken (Elske, Derk, au pair). Groep NIET dempen op die
+#   telefoon: zonder melding is er niets te lezen.
+#
+# Beperkingen (eerlijk):
+#   - De telefoon moet aan, online en met HA verbonden zijn; een gedempte chat of
+#     "Niet storen" met geblokkeerde meldingen = geen invoer.
+#   - Bij meerdere ongelezen berichten bundelt WhatsApp de melding; android.text bevat dan
+#     meestal alleen het laatste bericht. Dus: elk item als los bericht sturen, of de
+#     berichten één voor één laten binnenkomen.
+#   - De exacte attribuutnamen (android.title / android.text) eerst controleren via
+#     Developer tools -> States -> sensor.pixel_10_pro_last_notification na een testbericht.
+alias: Weekschema - WhatsApp-groep via notificatie
+description: Nieuw bericht in WhatsApp-groep "Weekschema" (notificatie op de Pixel) -> agenda-item
+mode: queued
+max: 10
+triggers:
+  - trigger: state
+    entity_id: sensor.pixel_10_pro_last_notification
+conditions:
+  - condition: template
+    value_template: "{{ trigger.to_state.attributes.package | default('') == 'com.whatsapp' }}"
+  - condition: template
+    value_template: "{{ (trigger.to_state.attributes['android.title'] | default('')) | lower == 'weekschema' }}"
+  - condition: template
+    # dezelfde melding niet twee keer verwerken
+    value_template: >-
+      {{ trigger.from_state is none
+         or trigger.to_state.attributes.post_time | default(0) != trigger.from_state.attributes.post_time | default(1) }}
+actions:
+  - variables:
+      ruw: "{{ trigger.to_state.attributes['android.text'] | default('') }}"
+      # "Elske: di 15:00 Thijs tandarts" -> "di 15:00 Thijs tandarts"
+      tekst: "{{ ruw | regex_replace('^[^:\\n]{1,40}: ', '') | trim }}"
+  - condition: template
+    value_template: "{{ tekst != '' }}"
+  - action: script.weekschema_item_toevoegen
+    data:
+      tekst: "{{ tekst }}"
+      bron: whatsapp
+  - action: notify.mobile_app_pixel_10_pro
+    data:
+      title: Weekschema bijgewerkt
+      message: "Via WhatsApp: {{ tekst }}"

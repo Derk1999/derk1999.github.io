@@ -1,0 +1,43 @@
+# Trigger-template sensor voor het dashboard: de extra items van vandaag/morgen/overmorgen.
+# Zelfde patroon als sensor.rooster_dag (Zermelo), inclusief de `this`-fallback uit de les
+# van 19-09-2026, zodat een tijdelijk onbereikbare agenda de kaart niet leegt.
+#
+# Plaatsen in configuration.yaml onder `template:` (via de Samba-mount ~/mnt/ha-config op de Mac),
+# daarna Developer tools -> YAML -> "Template entities" herladen.
+template:
+  - trigger:
+      - trigger: state
+        entity_id: calendar.weekschema
+      - trigger: time_pattern
+        minutes: "/15"
+      - trigger: homeassistant
+        event: start
+      - trigger: event
+        event_type: weekschema_ververst
+      - trigger: time
+        at: "00:00:30"
+    action:
+      - if:
+          - condition: template
+            value_template: "{{ has_value('calendar.weekschema') }}"
+        then:
+          - action: calendar.get_events
+            target:
+              entity_id: calendar.weekschema
+            data:
+              start_date_time: "{{ now().replace(hour=0, minute=0, second=0, microsecond=0) }}"
+              duration:
+                days: 3
+            response_variable: ev
+    sensor:
+      - name: Weekschema extra
+        unique_id: weekschema_extra
+        icon: mdi:calendar-plus
+        state: >-
+          {{ (ev['calendar.weekschema'].events | count)
+             if ev is defined and 'calendar.weekschema' in ev else this.state }}
+        attributes:
+          events: >-
+            {{ ev['calendar.weekschema'].events
+               if ev is defined and 'calendar.weekschema' in ev else this.attributes.get('events', []) }}
+          bijgewerkt: "{{ now().isoformat() if ev is defined and 'calendar.weekschema' in ev else this.attributes.get('bijgewerkt') }}"
